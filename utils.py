@@ -1,12 +1,20 @@
 import torch
 import torch.func
 
+def flat(x):            # x : (B,C,H,W)  contiguous
+    return x.reshape(x.size(0), -1)           # (B, C*H*W)
+
+def unflat(v, C, H, W):  # v : (B, C*H*W)
+    return v.reshape(v.size(0), C, H, W)      # (B,C,H,W)
+
+
 def jacobian_batch(model, x_batch): 
     # Compute jacobian at a point (w.r.t. x only)
     B = len(x_batch) # batch size
-    J_all = torch.func.jacrev(model)(x_batch) #yields torch.Size([B, 10, B, 1, 28, 28])
-    J_diag = J_all.diagonal(dim1=0, dim2=2)   # (B,10,1,28,28)
-    J_diag = J_diag.reshape(B, 10, -1)        # (B,10,784)
+    J_all = torch.func.jacrev(model)(x_batch) # yields torch.Size([B, nb_classes, B, C, H, W])
+    nb_classes = J_all.shape[1]
+    J_diag = J_all.diagonal(dim1=0, dim2=2)   # (B,nb_classes,C,H,W)
+    J_diag = J_diag.reshape(B, nb_classes, -1)        # (B,nb_classes,CxHxW)
     return J_diag
 
 def flipping_vector(model, x_batch, attacked_class): 
@@ -33,5 +41,4 @@ def flipping_vector(model, x_batch, attacked_class):
 
     return flipping
 
-
-
+#def ocf_attack(model, batch)
