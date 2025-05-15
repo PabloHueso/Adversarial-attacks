@@ -40,6 +40,40 @@ def flipping_vector(model, x_batch, attacked_class=2):
     flipping[batch_indices, j] = 1
 
     return flipping 
+
+def step_estimator(model, batch, attacked_class=2):
+    topk = torch.topk(model(batch), k=attacked_class)
+    log_diff = topk.values[:, 0] - topk.values[:,-1] 
+    return torch.ceil(log_diff)
+
+def ocf_attack_pure(model, batch, attacked_class=2, nb_steps=1):
+    B, C, H, W = batch.shape # Batch size, number of channels, height and width respectively
+    adversarial_batch = batch.clone()
+    for i in range(nb_steps):
+        jacobian_b = jacobian_batch(model, adversarial_batch) # jacobian_b has shape [B, nb_classes, CxHxW] # jacobian needs B, this could be streamlined.
+        J_pinv = torch.linalg.pinv(jacobian_b) # [B, CxHxW, nb_classes]
+        flips = flipping_vector(model, adversarial_batch, attacked_class=attacked_class) # [B, c] (B flipping vectors) #this also needs B
+        attack = torch.bmm(J_pinv, flips.unsqueeze(2)) # Add unsqueeze to flips; dim [B,c] -> [B, c, 1]. Attack has shape [B, CxHxW, 1]
+        attack_matrix_batch = unflat(attack.squeeze(2), C, H, W) # Now attack has shape [B, C, H, W]
+        adversarial_batch += attack_matrix_batch # Add perturbation to the image batch
+    return adversarial_batch
+    
+
+def ocf_attack(model, batch, attacked_class=2, nb_steps=1, total_budget=5):
+    B, C, H, W = batch.shape # Batch size, number of channels, height and width respectively
+    adversarial_batch = batch.clone()
+    for i in range(nb_steps):
+        jacobian_b = jacobian_batch(model, adversarial_batch) # jacobian_b has shape [B, nb_classes, CxHxW] # jacobian needs B, this could be streamlined.
+        J_pinv = torch.linalg.pinv(jacobian_b) # [B, CxHxW, nb_classes]
+        flips = flipping_vector(model, adversarial_batch, attacked_class=attacked_class) # [B, c] (B flipping vectors) #this also needs B
+        attack = torch.bmm(J_pinv, flips.unsqueeze(2)) # Add unsqueeze to flips; dim [B,c] -> [B, c, 1]. Attack has shape [B, CxHxW, 1]
+        fro_norms = torch.linalg.matrix_norm(attack, ord='fro', dim=(-2, -1)) # Shape [B]
+        fro_norms = fro_norms.view(B, 1, 1) # Shape [B] -> [B,1,1]
+        attack_scaled = (attack/fro_norms) * (total_budget/nb_steps) 
+        attack_matrix_batch = unflat(attack_scaled.squeeze(2), C, H, W)
+        adversarial_batch = adversarial_batch + attack_matrix_batch 
+    return adversarial_batch 
+
 '''
 def ocf_attack_while(model, batch, attacked_class=2, max_budget=5, max_steps=1000, ):
     B, C, H, W = batch.shape # Batch size, number of channels, height and width respectively
@@ -62,31 +96,3 @@ def ocf_attack_while(model, batch, attacked_class=2, max_budget=5, max_steps=100
         current_step =+ 1 
     return adversarial_batch 
 '''
-def ocf_attack_pure(model, batch, attacked_class=2, nb_steps=1):
-    B, C, H, W = batch.shape # Batch size, number of channels, height and width respectively
-    adversarial_batch = batch.clone()
-    for i in range(nb_steps):
-        jacobian_b = jacobian_batch(model, adversarial_batch) # jacobian_b has shape [B, nb_classes, CxHxW] # jacobian needs B, this could be streamlined.
-        J_pinv = torch.linalg.pinv(jacobian_b) # [B, CxHxW, nb_classes]
-        flips = flipping_vector(model, adversarial_batch, attacked_class=attacked_class) # [B, c] (B flipping vectors) #this also needs B
-        attack = torch.bmm(J_pinv, flips.unsqueeze(2)) # Add unsqueeze to flips; dim [B,c] -> [B, c, 1]. Attack has shape [B, CxHxW, 1]
-        attack_matrix_batch = unflat(attack.squeeze(2), C, H, W) # Now attack has shape [B, C, H, W]
-        adversarial_batch += attack_matrix_batch # Add perturbation to the image batch
-    return adversarial_batch
-    
-    return adversarial_batch, perturbation_batch
-
-def ocf_attack(model, batch, attacked_class=2, nb_steps=1, total_budget=5):
-    B, C, H, W = batch.shape # Batch size, number of channels, height and width respectively
-    adversarial_batch = batch.clone()
-    for i in range(nb_steps):
-        jacobian_b = jacobian_batch(model, adversarial_batch) # jacobian_b has shape [B, nb_classes, CxHxW] # jacobian needs B, this could be streamlined.
-        J_pinv = torch.linalg.pinv(jacobian_b) # [B, CxHxW, nb_classes]
-        flips = flipping_vector(model, adversarial_batch, attacked_class=attacked_class) # [B, c] (B flipping vectors) #this also needs B
-        attack = torch.bmm(J_pinv, flips.unsqueeze(2)) # Add unsqueeze to flips; dim [B,c] -> [B, c, 1]. Attack has shape [B, CxHxW, 1]
-        fro_norms = torch.linalg.matrix_norm(attack, ord='fro', dim=(-2, -1)) # Shape [B]
-        fro_norms = fro_norms.view(B, 1, 1) # Shape [B] -> [B,1,1]
-        attack_scaled = (attack/fro_norms) * (total_budget/nb_steps) 
-        attack_matrix_batch = unflat(attack_scaled.squeeze(2), C, H, W)
-        adversarial_batch = adversarial_batch + attack_matrix_batch 
-    return adversarial_batch 
