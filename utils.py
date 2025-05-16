@@ -8,14 +8,18 @@ def unflat(v, C, H, W):  # v : (B, C*H*W)
     return v.reshape(v.size(0), C, H, W)      # (B,C,H,W)
 
 
-def jacobian_batch(model, x_batch): 
-    # Compute jacobian at a point (w.r.t. x only)
-    B = len(x_batch) # batch size
-    J_all = torch.func.jacrev(model)(x_batch) # yields torch.Size([B, nb_classes, B, C, H, W])
-    nb_classes = J_all.shape[1]
-    J_diag = J_all.diagonal(dim1=0, dim2=2)   # (B,nb_classes,C,H,W)
-    J_diag = J_diag.reshape(B, nb_classes, -1)        # (B,nb_classes,CxHxW)
-    return J_diag
+def jacobian_batch(model, x_batch):
+    # Function that takes one single image as input (no batch dim)
+    f_single = lambda x: model(x.unsqueeze(0))[0]          # logits shape [C_out]
+
+    # jacobian over single input function
+    jac_single = torch.func.jacrev(f_single)               # callable
+
+    # Batch that function
+    J = torch.vmap(jac_single)(x_batch)                    # [B, C_out, C, H, W]
+
+    return J.reshape(J.size(0), J.size(1), -1)             # [B, C_out, C*H*W]
+
 
 def flipping_vector(model, x_batch, attacked_class=2): 
     model_output = model(x_batch) # [B, c]
