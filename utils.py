@@ -62,41 +62,36 @@ def ocf_attack_pure(model, batch, attacked_class=2, nb_steps=1):
         adversarial_batch += attack_matrix_batch # Add perturbation to the image batch
     return adversarial_batch
     
+def ocf_attack_until_flip(model, batch, attacked_class: int = 2, max_steps: int = 50):
+    device = batch.device
+    B, C, H, W = batch.shape
 
-def ocf_attack(model, batch, attacked_class=2, nb_steps=1, total_budget=5):
-    B, C, H, W = batch.shape # Batch size, number of channels, height and width respectively
-    adversarial_batch = batch.clone()
-    for i in range(nb_steps):
-        jacobian_b = jacobian_batch(model, adversarial_batch) # jacobian_b has shape [B, nb_classes, CxHxW] # jacobian needs B, this could be streamlined.
-        J_pinv = torch.linalg.pinv(jacobian_b) # [B, CxHxW, nb_classes]
-        flips = flipping_vector(model, adversarial_batch, attacked_class=attacked_class) # [B, c] (B flipping vectors) #this also needs B
-        attack = torch.bmm(J_pinv, flips.unsqueeze(2)) # Add unsqueeze to flips; dim [B,c] -> [B, c, 1]. Attack has shape [B, CxHxW, 1]
-        fro_norms = torch.linalg.matrix_norm(attack, ord='fro', dim=(-2, -1)) # Shape [B]
-        fro_norms = fro_norms.view(B, 1, 1) # Shape [B] -> [B,1,1]
-        attack_scaled = (attack/fro_norms) * (total_budget/nb_steps) 
-        attack_matrix_batch = unflat(attack_scaled.squeeze(2), C, H, W)
-        adversarial_batch = adversarial_batch + attack_matrix_batch 
-    return adversarial_batch 
+    with torch.no_grad():
+        orig_pred = model(batch).argmax(dim=1)          # [B]
 
-'''
-def ocf_attack_while(model, batch, attacked_class=2, max_budget=5, max_steps=1000, ):
-    B, C, H, W = batch.shape # Batch size, number of channels, height and width respectively
-    adversarial_batch = batch
-    current_step = 1
-    current_norm = torch.zeros(B)
-    netFooled = False
-    #Puesto que estoy trabajando con un batch de B imagenes, tengo que encontrar una forma de parar el proceso en solo algunos de las imagenes del batch.
-    while ((not netFooled) and current_norm <= max_budget and current_step<=max_steps):
-        jacobian_b = jacobian_batch(model, adversarial_batch) # jacobian_b has shape [B, nb_classes, CxHxW] # jacobian needs B, this could be streamlined.
-        J_pinv = torch.linalg.pinv(jacobian_b) # [B, CxHxW, nb_classes]
-        flips = flipping_vector(model, adversarial_batch, attacked_class=attacked_class) # [B, c] (B flipping vectors) #this also needs B
-        attack = torch.bmm(J_pinv, flips.unsqueeze(2)) # Add unsqueeze to flips; dim [B,c] -> [B, c, 1]. Attack has shape [B, CxHxW, 1]
-        fro_norms = torch.linalg.matrix_norm(attack, ord='fro', dim=(-2, -1)) # Shape [B]
-        current_norm =+ fro_norms
-        fro_norms = fro_norms.view(B, 1, 1) # Shape [B] -> [B,1,1]
-        attack_scaled = (attack/fro_norms) 
-        attack_matrix_batch = unflat(attack_scaled.squeeze(2), C, H, W)
-        adversarial_batch = adversarial_batch + attack_matrix_batch 
-        current_step =+ 1 
-    return adversarial_batch 
-'''
+    adv = batch.clone()
+
+    # Boolean masks that track progress
+    done  = torch.zeros(B, dtype=torch.bool, device=device)
+
+    for _ in range(max_steps):
+        active = ~done                                   # images still in play
+        if not active.any():
+            break
+
+        cur    = adv[active]                             # (B_active,C,H,W)
+        jac    = jacobian_batch(model, cur)              # [B_act, c, n]
+        J_pinv = torch.linalg.pinv(jac)                  # [B_act, n, c]
+        flips  = flipping_vector(model, cur, attacked_class)  # [B_act, c]
+
+        delta  = torch.bmm(J_pinv, flips.unsqueeze(2)).squeeze(2)  # [B_act, n]
+        adv[active] += unflat(delta, C, H, W)
+
+
+        # Check if active images flipped class
+        with torch.no_grad():
+            new_pred = model(adv[active]).argmax(dim=1)
+        just_flipped      = new_pred != orig_pred[active]
+        done[active]      |= just_flipped                # mark as finished
+
+    return adv
