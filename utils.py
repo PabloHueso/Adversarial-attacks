@@ -99,6 +99,7 @@ def ocf_attack_until_flip(model, batch, attacked_class: int = 2, max_steps: int 
 
     return adv
 
+# This function can be streamlined: I am calculating all the info for all the batch, which can be significantly longer than nb_examples
 def attack_examples(model, images, labels, attack, nb_examples):
     img_adv = attack(model, images)
     pert = (img_adv - images)
