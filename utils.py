@@ -1,5 +1,8 @@
 import torch
 import torch.func
+import matplotlib as plt
+import matplotlib.pyplot as plt
+import numpy as np
 
 def flat(x):            # x : (B,C,H,W)  contiguous
     return x.reshape(x.size(0), -1)           # (B, C*H*W)
@@ -48,7 +51,7 @@ def flipping_vector(model, x_batch, attacked_class=2):
 def step_estimator(model, batch, attacked_class=2):
     topk = torch.topk(model(batch), k=attacked_class)
     log_diff = topk.values[:, 0] - topk.values[:,-1] 
-    return torch.ceil(log_diff)
+    return log_diff #torch.ceil(log_diff)
 
 def ocf_attack_pure(model, batch, attacked_class=2, nb_steps=1):
     B, C, H, W = batch.shape # Batch size, number of channels, height and width respectively
@@ -95,3 +98,44 @@ def ocf_attack_until_flip(model, batch, attacked_class: int = 2, max_steps: int 
         done[active]      |= just_flipped                # mark as finished
 
     return adv
+
+def attack_examples(model, images, labels, attack, nb_examples):
+    img_adv = attack(model, images)
+    pert = (img_adv - images)
+    pert_norm = pert.view(len(images), -1).norm(dim=1) 
+    pred_adv = model(img_adv).argmax(dim=1).to('cpu')
+    
+    pert = pert.to('cpu')
+    img_adv = img_adv.to('cpu')
+    images = images.to('cpu')
+    labels = labels.to('cpu')
+
+    height_per_example = 4
+    fig_width = 10
+    fig_height = nb_examples * height_per_example
+
+    fig, axs = plt.subplots(nb_examples, 3, figsize=(fig_width, fig_height))
+
+
+    if nb_examples == 1:
+        axs = axs.reshape(1, 3)
+
+    with torch.no_grad():
+        for example in range(nb_examples):
+            # Original
+            im0 = axs[example, 0].matshow(images[example].squeeze(0), aspect='auto')
+            axs[example, 0].set_title(f"Original\npred={labels[example].item()}", fontsize=14)
+            fig.colorbar(im0, ax=axs[example, 0])
+
+            # Perturbation
+            im1 = axs[example, 1].matshow(pert[example].squeeze(0).numpy(), aspect='auto')
+            axs[example, 1].set_title(f"Perturbation\nnorm={pert_norm[example].item()}", fontsize=14)
+            fig.colorbar(im1, ax=axs[example, 1])
+
+            # Adversarial
+            im2 = axs[example, 2].matshow(img_adv[example].squeeze(0), aspect='auto')
+            axs[example, 2].set_title(f"Adversarial\npred={pred_adv[example].item()}", fontsize=14)
+            fig.colorbar(im2, ax=axs[example, 2])
+
+    plt.tight_layout()
+    plt.show()
