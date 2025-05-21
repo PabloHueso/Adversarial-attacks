@@ -146,15 +146,6 @@ import torch
 from tqdm.auto import tqdm          # auto picks the right backend (notebook, console…)
 
 def eval_loop(model, testloader, attack, device):
-    """
-    Returns a dict with:
-        accuracy       – clean accuracy
-        adv_accuracy   – accuracy on adversarial inputs
-        flipped_pct    – proportion of samples whose prediction flips
-        norms          – 1-D tensor [N] with ‖δ‖₂ per sample
-        confidences    – 1-D tensor [N] with confidence per sample
-        labels         – 1-D tensor [N] with ground-truth class per sample
-    """
     model.eval()
 
     N = len(testloader.dataset)                # total samples
@@ -163,10 +154,9 @@ def eval_loop(model, testloader, attack, device):
     labels      = torch.empty(N, dtype=torch.long, device=device)
 
     correct_clean = 0
-    correct_adv   = 0
-    flipped       = 0
-    idx           = 0                          # write cursor
-
+    correct_adv = 0
+    flipped = 0
+    idx = 0      
     with torch.no_grad():
         for X, y in tqdm(testloader, desc="Evaluating", unit="batch"):
             X, y = X.to(device), y.to(device)
@@ -188,14 +178,13 @@ def eval_loop(model, testloader, attack, device):
 
             flipped += (pred_adv != pred).sum().item()
 
-            # ‖δ‖₂ per sample
             delta      = (X_adv - X).view(B, -1)
             norm_batch = torch.linalg.norm(delta, dim=1, ord=2)
 
             # --- store everything ----------------------------------------------
-            norms[idx:idx+B]       = norm_batch
+            norms[idx:idx+B] = norm_batch
             confidences[idx:idx+B] = conf_batch
-            labels[idx:idx+B]      = y            # save ground-truth classes
+            labels[idx:idx+B] = y            # save ground-truth classes
             idx += B
 
     return {
