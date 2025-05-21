@@ -13,3 +13,6 @@ venv/
 
 # VSCode settings
 .vscode/
+
+#Ignore datasets folder (why push public datasets...)
+Datasets/
