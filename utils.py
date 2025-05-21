@@ -3,6 +3,7 @@ import torch.func
 import matplotlib as plt
 import matplotlib.pyplot as plt
 import numpy as np
+from tqdm.auto import tqdm  
 
 def flat(x):            # x : (B,C,H,W)  contiguous
     return x.reshape(x.size(0), -1)           # (B, C*H*W)
@@ -140,3 +141,68 @@ def attack_examples(model, images, labels, attack, nb_examples):
 
     plt.tight_layout()
     plt.show()
+
+import torch
+from tqdm.auto import tqdm          # auto picks the right backend (notebook, console…)
+
+def eval_loop(model, testloader, attack, device):
+    """
+    Returns a dict with:
+        accuracy       – clean accuracy
+        adv_accuracy   – accuracy on adversarial inputs
+        flipped_pct    – proportion of samples whose prediction flips
+        norms          – 1-D tensor [N] with ‖δ‖₂ per sample
+        confidences    – 1-D tensor [N] with confidence per sample
+        labels         – 1-D tensor [N] with ground-truth class per sample
+    """
+    model.eval()
+
+    N = len(testloader.dataset)                # total samples
+    norms       = torch.empty(N, device=device)
+    confidences = torch.empty(N, device=device)
+    labels      = torch.empty(N, dtype=torch.long, device=device)
+
+    correct_clean = 0
+    correct_adv   = 0
+    flipped       = 0
+    idx           = 0                          # write cursor
+
+    with torch.no_grad():
+        for X, y in tqdm(testloader, desc="Evaluating", unit="batch"):
+            X, y = X.to(device), y.to(device)
+            B    = X.size(0)
+
+            # --- clean ----------------------------------------------------------
+            logits = model(X)
+            pred   = logits.argmax(dim=1)
+            correct_clean += (pred == y).sum().item()
+
+            # confidence per sample
+            conf_batch = step_estimator(model, X)
+
+            # --- adversarial ----------------------------------------------------
+            X_adv      = attack(model, X)
+            logits_adv = model(X_adv)
+            pred_adv   = logits_adv.argmax(dim=1)
+            correct_adv += (pred_adv == y).sum().item()
+
+            flipped += (pred_adv != pred).sum().item()
+
+            # ‖δ‖₂ per sample
+            delta      = (X_adv - X).view(B, -1)
+            norm_batch = torch.linalg.norm(delta, dim=1, ord=2)
+
+            # --- store everything ----------------------------------------------
+            norms[idx:idx+B]       = norm_batch
+            confidences[idx:idx+B] = conf_batch
+            labels[idx:idx+B]      = y            # save ground-truth classes
+            idx += B
+
+    return {
+        "accuracy"     : correct_clean / N,
+        "adv_accuracy" : correct_adv   / N,
+        "flipped_pct"  : flipped       / N,
+        "norms"        : norms.cpu(),
+        "confidences"  : confidences.cpu(),
+        "labels"       : labels.cpu()
+    }
