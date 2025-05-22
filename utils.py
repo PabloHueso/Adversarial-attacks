@@ -11,6 +11,10 @@ def flat(x):            # x : (B,C,H,W)  contiguous
 def unflat(v, C, H, W):  # v : (B, C*H*W)
     return v.reshape(v.size(0), C, H, W)      # (B,C,H,W)
 
+def batchnorm(tensor):
+    # Assumes tensor shape is [B, C, H, W]. Returns tensor of shape [B] containing 2-norm of each [C, H, W] tensor
+    flat_tensor = flat(tensor)
+    return torch.linalg.norm(flat_tensor, dim=1, ord=2)
 
 def jacobian_batch(model, x_batch):
     # Function that takes one single image as input (no batch dim)
@@ -104,7 +108,7 @@ def ocf_attack_until_flip(model, batch, attacked_class: int = 2, max_steps: int 
 def attack_examples(model, images, labels, attack, nb_examples):
     img_adv = attack(model, images)
     pert = (img_adv - images)
-    pert_norm = pert.view(len(images), -1).norm(dim=1) 
+    pert_norm = batchnorm(pert)
     pred_adv = model(img_adv).argmax(dim=1).to('cpu')
     
     pert = pert.to('cpu')
@@ -178,8 +182,8 @@ def eval_loop(model, testloader, attack, device):
 
             flipped += (pred_adv != pred).sum().item()
 
-            delta      = (X_adv - X).view(B, -1)
-            norm_batch = torch.linalg.norm(delta, dim=1, ord=2)
+            delta      = (X_adv - X)
+            norm_batch = batchnorm(delta)
 
             # --- store everything ----------------------------------------------
             norms[idx:idx+B] = norm_batch
