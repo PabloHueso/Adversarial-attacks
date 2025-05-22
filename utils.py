@@ -18,9 +18,9 @@ def batchnorm(tensor, p=2):
 
 def comparable_norm(tensor, lower=0, upper=1, p=2):
     # Assumes tensor shape is [B, C, H, W]. Returns tensor of shape [B] containing a comparable p-norm of each [C, H, W] tensor
-    # Comparable norm:
+    # Comparable norm: assumes that images belong to [lower, upper]^CxHxW, and normalizes the p-norm so that it belongs to the range [0, 1]
     flat_tensor = flat(tensor)
-    coeff = np.power((flat_tensor.shape[1] * np.max(np.abs(upper), np.abs(lower))**p), 1/p)
+    coeff = np.power(flat_tensor.shape[1], 1/p) * np.max(np.abs(upper), np.abs(lower))
     norm = torch.linalg.norm(flat_tensor, dim=1, ord=p)
     return norm / coeff
 def jacobian_batch(model, x_batch):
