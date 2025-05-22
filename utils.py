@@ -11,11 +11,18 @@ def flat(x):            # x : (B,C,H,W)  contiguous
 def unflat(v, C, H, W):  # v : (B, C*H*W)
     return v.reshape(v.size(0), C, H, W)      # (B,C,H,W)
 
-def batchnorm(tensor):
-    # Assumes tensor shape is [B, C, H, W]. Returns tensor of shape [B] containing 2-norm of each [C, H, W] tensor
+def batchnorm(tensor, p=2):
+    # Assumes tensor shape is [B, C, H, W]. Returns tensor of shape [B] containing p-norm of each [C, H, W] tensor
     flat_tensor = flat(tensor)
-    return torch.linalg.norm(flat_tensor, dim=1, ord=2)
+    return torch.linalg.norm(flat_tensor, dim=1, ord=p)
 
+def comparable_norm(tensor, lower=0, upper=1, p=2):
+    # Assumes tensor shape is [B, C, H, W]. Returns tensor of shape [B] containing a comparable p-norm of each [C, H, W] tensor
+    # Comparable norm:
+    flat_tensor = flat(tensor)
+    coeff = np.power((flat_tensor.shape[1] * np.max(np.abs(upper), np.abs(lower))**p), 1/p)
+    norm = torch.linalg.norm(flat_tensor, dim=1, ord=p)
+    return norm / coeff
 def jacobian_batch(model, x_batch):
     # Function that takes one single image as input (no batch dim)
     f_single = lambda x: model(x.unsqueeze(0))[0]          # logits shape [C_out]
