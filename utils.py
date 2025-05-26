@@ -156,6 +156,51 @@ def ocf_attack_until_flip_budget(model, batch, attacked_class = 2, max_budget = 
             break
     return adv
 
+def ocf_attack(model, batch, attacked_class = 2, max_budget = 5.0, max_steps = 50):
+    device = batch.device
+    B, C, H, W = batch.shape
+
+    with torch.no_grad():
+        orig_pred = model(batch).argmax(1)                # [B]
+
+    adv   = batch.clone()
+    #pert  = torch.zeros_like(batch)
+    active = torch.ones(B, dtype=torch.bool, device=device)
+
+    for _ in range(max_steps):
+
+        # Each loop step operates solely on th remaining (active) images of the batch
+        cur_adv = adv[active]                           
+        #cur_pert = pert[active]
+
+        jac = jacobian_batch(model, cur_adv)      # [B_active, c, n]
+        Jpinv = torch.linalg.pinv(jac)                    # [B_active, n, c]
+        flips = flipping_vector(model, cur_adv, attacked_class)
+
+        delta = torch.bmm(Jpinv, flips.unsqueeze(2)).squeeze(2)  # [B_active,n]
+        delta = unflat(delta, C, H, W)                       # [B_active,C,H,W]
+
+        fut_pert = torch.clamp(cur_adv + delta,min=0, max=1) - batch[active]
+        over = batchnorm(fut_pert) > max_budget          # bool [B_active]
+
+        keep_mask = ~over
+        if keep_mask.any():
+            idx = active.nonzero(as_tuple=True)[0][keep_mask]      # global indexes of the active images in the active tensor
+            adv[idx]  = torch.clamp(adv[idx] + delta[keep_mask], min=0, max=1)
+            #pert[idx] += delta[keep_mask]
+
+        with torch.no_grad():
+            new_pred = model(adv[active]).argmax(1)
+        flipped = new_pred != orig_pred[active]
+
+        # a sample stays alive only if it neither flipped nor overshot
+        still_alive = ~(flipped | over)
+        active[active.clone()] = still_alive
+
+        if not active.any():
+            break
+    return adv
+
 # This function can be streamlined: I am calculating all the info for all the batch, which can be significantly longer than nb_examples
 def attack_examples(model, images, labels, attack, nb_examples):
     img_adv = attack(model, images)
