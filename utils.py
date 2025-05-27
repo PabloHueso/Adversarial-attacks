@@ -4,6 +4,7 @@ import matplotlib as plt
 import matplotlib.pyplot as plt
 import numpy as np
 from tqdm.auto import tqdm  
+from autoattack import AutoAttack
 
 def flat(x):            # x : (B,C,H,W)  contiguous
     return x.reshape(x.size(0), -1)           # (B, C*H*W)
@@ -296,3 +297,8 @@ def eval_loop(model, testloader, attack, device):
         "confidences"  : confidences.cpu(),
         "labels"       : labels.cpu()
     }
+
+def AutoAttackConversor(model, attack, eps, device, norm='L2'):
+    #Returns an attack function in format attack(model, batch), i.e. adapted to eval_loop()
+    attack_obj = AutoAttack(model=model, norm=norm, eps=eps, device=device, version='custom', attacks_to_run=[attack], verbose=False)
+    return lambda model, batch : attack_obj.run_standard_evaluation(x_orig=batch.to(device), y_orig=torch.zeros(batch.shape[0], dtype=torch.int64).to(device), bs=batch.shape[0])
