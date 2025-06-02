@@ -302,3 +302,87 @@ def AutoAttackConversor(model, attack, eps, device, norm='L2'):
     #Returns an attack function in format attack(model, batch), i.e. adapted to eval_loop()
     attack_obj = AutoAttack(model=model, norm=norm, eps=eps, device=device, version='custom', attacks_to_run=[attack], verbose=False)
     return lambda model, batch : attack_obj.run_standard_evaluation(x_orig=batch.to(device), y_orig=torch.zeros(batch.shape[0], dtype=torch.int64).to(device), bs=batch.shape[0])
+
+def project_image_with_target_norm(
+        img: torch.Tensor,
+        k: float,
+        *,
+        eps: float = 1e-12
+) -> torch.Tensor:
+    """
+    Scale a (C,H,W) image by a single scalar, clamp to [0,1], and choose the
+    scalar so the clamped image has Euclidean norm k whenever feasible.
+    If k exceeds the maximum attainable norm, return that maximally saturated
+    image instead.
+
+    Parameters
+    ----------
+    img : torch.Tensor, shape (C,H,W)
+        Input image (CPU or GPU, any dtype).
+    k   : float
+        Desired ℓ₂-norm after clamping.
+    eps : float, optional
+        Numerical tolerance.
+
+    Returns
+    -------
+    torch.Tensor  # shape (C,H,W)
+        The projected image.
+    """
+    if img.ndim != 3:
+        raise ValueError("Expected a 3-D tensor of shape [C,H,W].")
+
+    flat = img.reshape(-1)                           # view (n,)
+    if k <= eps or torch.all(flat <= 0):
+        return torch.zeros_like(img)                 # trivial cases
+
+    # ---- positive entries only --------------------------------------------
+    pos_mask = flat > 0
+    v_pos    = flat[pos_mask]                        # length m
+    m        = v_pos.numel()
+    if m == 0:
+        return torch.zeros_like(img)
+
+    # ---- maximum norm if all positives saturate at 1 -----------------------
+    max_norm = m ** 0.5
+    if k >= max_norm - eps:
+        saturated = torch.zeros_like(flat)
+        saturated[pos_mask] = 1.0
+        return saturated.reshape_as(img)
+
+    # ---- break-points t_i = 1 / v_i  (ascending) ---------------------------
+    t_i, perm   = (1.0 / v_pos).sort()
+    v_sorted    = v_pos[perm]
+    v_sq        = v_sorted.pow(2)
+
+    # suffix_sq[j] = Σ_{i=j}^{m-1} v_sorted[i]²
+    suffix_sq = torch.flip(
+        torch.cumsum(torch.flip(v_sq, dims=[0]), dim=0), dims=[0]
+    )
+
+    k_sq   = k * k
+    s_star = None
+    prev_t = 0.0
+
+    # ---- walk the m+1 intervals -------------------------------------------
+    for idx in range(m + 1):
+        A_idx = suffix_sq[idx] if idx < m else torch.tensor(0.0, device=img.device)
+        rhs   = k_sq - idx                      # equation: idx + A_idx s² = k²
+
+        if rhs >= -eps and A_idx > eps:
+            s_cand = torch.sqrt(torch.clamp(rhs / A_idx, min=0.0)).item()
+            hi = t_i[idx] if idx < m else float("inf")
+            if prev_t - eps <= s_cand <= hi + eps:
+                s_star = s_cand
+                break
+        prev_t = t_i[idx] if idx < m else prev_t
+
+    # ---- numerical fallback (should be rare) -------------------------------
+    if s_star is None:
+        saturated = torch.zeros_like(flat)
+        saturated[pos_mask] = 1.0
+        return saturated.reshape_as(img)
+
+    # ---- build and return the projected image ------------------------------
+    projected = torch.clamp(flat * s_star, 0.0, 1.0)
+    return projected.reshape_as(img)
