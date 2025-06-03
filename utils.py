@@ -37,7 +37,7 @@ def jacobian_batch(model, x_batch):
     return J.reshape(J.size(0), J.size(1), -1)             # [B, C_out, C*H*W]
 
 
-def flipping_vector(model, x_batch, attacked_class=2): 
+def flipping_vector(model, x_batch, attacked_class=2, eps=1): 
     model_output = model(x_batch) # [B, c]
     B, c = model_output.shape
 
@@ -56,8 +56,8 @@ def flipping_vector(model, x_batch, attacked_class=2):
 
     batch_indices = torch.arange(B) #vector [0, 1, ... , B-1]
 
-    flipping[batch_indices, i] = -1
-    flipping[batch_indices, j] = 1
+    flipping[batch_indices, i] = -eps
+    flipping[batch_indices, j] = eps
 
     return flipping 
 
