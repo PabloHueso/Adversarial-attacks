@@ -157,7 +157,7 @@ def ocf_attack_until_flip_budget(model, batch, attacked_class = 2, max_budget = 
             break
     return adv
 
-def ocf_attack(model, batch, attacked_class = 2, max_budget = 5.0, max_steps = 50):
+def ocf_attack(model, batch, eps= 1, attacked_class = 2, max_budget = 5.0, max_steps = 100):
     device = batch.device
     B, C, H, W = batch.shape
 
@@ -176,7 +176,7 @@ def ocf_attack(model, batch, attacked_class = 2, max_budget = 5.0, max_steps = 5
 
         jac = jacobian_batch(model, cur_adv)      # [B_active, c, n]
         Jpinv = torch.linalg.pinv(jac)                    # [B_active, n, c]
-        flips = flipping_vector(model, cur_adv, attacked_class)
+        flips = flipping_vector(model, cur_adv, attacked_class, eps)
 
         delta = torch.bmm(Jpinv, flips.unsqueeze(2)).squeeze(2)  # [B_active,n]
         delta = unflat(delta, C, H, W)                       # [B_active,C,H,W]
